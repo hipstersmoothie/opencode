@@ -123,7 +123,7 @@ describe("Mistral Chat", () => {
         },
         {
           role: "assistant",
-          content: "ThinkCalling",
+          content: "Calling",
         },
       ])
       const assistant = prepared.body.messages[3]
@@ -227,6 +227,7 @@ describe("Mistral Chat", () => {
           messages: [
             Message.assistant(" \n "),
             Message.assistant({ type: "reasoning", text: "\t" }),
+            Message.assistant({ type: "reasoning", text: "Foreign reasoning without mistral metadata" }),
             Message.assistant({ type: "tool-call", id: "Ab12Cd34E", name: "lookup", input: {} }),
           ],
         }),

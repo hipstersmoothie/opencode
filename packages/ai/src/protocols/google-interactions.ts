@@ -20,6 +20,7 @@ import { JsonObject, knownString, lenient, optionalNull, ProviderShared } from "
 import { Lifecycle } from "./utils/lifecycle.js"
 import { MediaInput } from "./utils/media-input.js"
 import { GeminiGenerateContent } from "./utils/gemini-generate-content.js"
+import { requiresThoughtSignatureFallback, SKIP_THOUGHT_SIGNATURE_VALIDATOR } from "./utils/thinking-signature.js"
 import { ToolStream } from "./utils/tool-stream.js"
 
 const ADAPTER = "google-interactions"
@@ -259,6 +260,7 @@ const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest) {
         steps[steps.length - 1] = { type, content: [...last.content, content] }
       else steps.push({ type, content: [content] })
     }
+    let hasSignedToolCall = false
     for (const part of message.content) {
       if (message.role === "tool") {
         if (part.type !== "tool-result")
@@ -289,13 +291,19 @@ const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest) {
         continue
       }
       if (message.role === "assistant" && part.type === "tool-call") {
+        const toolSignature = signature(part.providerMetadata, key)
         steps.push({
           type: "function_call",
           id: part.id,
           name: part.name,
           arguments: part.input,
-          signature: signature(part.providerMetadata, key),
+          signature:
+            toolSignature ??
+            (requiresThoughtSignatureFallback(request.model.id) && !hasSignedToolCall
+              ? SKIP_THOUGHT_SIGNATURE_VALIDATOR
+              : undefined),
         })
+        if (toolSignature !== undefined) hasSignedToolCall = true
         continue
       }
       return yield* ProviderShared.unsupportedContent(

@@ -608,7 +608,13 @@ describe("Gemini route", () => {
         model: "gemini-3-flash-preview",
         input: [
           { type: "user_input", content: [{ type: "video", uri, mime_type: "video/mp4" }] },
-          { type: "function_call", id: "call_video", name: "read", arguments: {} },
+          {
+            type: "function_call",
+            id: "call_video",
+            name: "read",
+            arguments: {},
+            signature: "skip_thought_signature_validator",
+          },
           {
             type: "function_result",
             call_id: "call_video",

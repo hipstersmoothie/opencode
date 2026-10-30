@@ -679,6 +679,7 @@ export type ModelCompatibility = {
   maxTokensField?: ModelMaxTokensField
   requireFinishReason?: boolean
   requireAssistantAfterTool?: boolean
+  requireSignature?: boolean
   supportsPromptCacheKey?: boolean
   streamUsage?: boolean
   cacheFormat?: ModelCacheFormat
@@ -693,6 +694,7 @@ export type ProviderCompatibility = {
   maxTokensField?: ModelMaxTokensField
   requireFinishReason?: boolean
   requireAssistantAfterTool?: boolean
+  requireSignature?: boolean
   supportsPromptCacheKey?: boolean
   streamUsage?: boolean
   cacheFormat?: ModelCacheFormat

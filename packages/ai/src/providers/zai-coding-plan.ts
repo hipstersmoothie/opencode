@@ -67,9 +67,7 @@ export const configure = (input: Config = {}) => {
   const chat = (modelID: string | ModelID) =>
     chatRoute.with(defaults).model<ChatOptionsInput>({ id: modelID, compatibility: ZAIChat.compatibility })
   const messages = (modelID: string | ModelID) =>
-    messagesRoute
-      .with(defaults)
-      .model<MessagesOptionsInput>({ id: modelID, compatibility: { requireSignature: false } })
+    messagesRoute.with(defaults).model<MessagesOptionsInput>({ id: modelID })
   const responses = (modelID: string | ModelID) =>
     responsesRoute.with(defaults).model<ResponsesOptionsInput>({ id: modelID })
   return { id, model: chat, chat, messages, responses, configure }

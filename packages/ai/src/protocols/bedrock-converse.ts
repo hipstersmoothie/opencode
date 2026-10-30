@@ -28,6 +28,7 @@ import { BedrockMedia } from "./utils/bedrock-media.js"
 import { claudeVersion, supportsThinkingBlockBinding, THINKING_BINDING_BETA } from "./utils/claude-model.js"
 import { Lifecycle } from "./utils/lifecycle.js"
 import { MistralToolID } from "./utils/mistral-tool-id.js"
+import { requireThinkingSignature } from "./utils/thinking-signature.js"
 import { ToolStream } from "./utils/tool-stream.js"
 import { concatBytes } from "../utils/bytes.js"
 
@@ -428,9 +429,9 @@ const lowerMessages = Effect.fnUntraced(function* (
             continue
           }
           if (signature === undefined || signature.trim().length === 0) {
-            // Interrupted streams and model switches can leave unsigned reasoning.
-            // Preserve readable history as text rather than replay invalid reasoningContent.
-            if (part.text.trim().length > 0) content.push(...textWithCache(breakpoints, part.text, part.cache))
+            if (part.text.trim().length > 0 && !requireThinkingSignature(request.model)) {
+              content.push({ reasoningContent: { reasoningText: { text: part.text } } })
+            }
             continue
           }
           content.push({ reasoningContent: { reasoningText: { text: part.text, signature } } })

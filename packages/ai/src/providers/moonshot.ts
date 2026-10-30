@@ -119,7 +119,7 @@ export const configure = (input: Config = {}) => {
   const messages = (modelID: string | ModelID) =>
     messagesRoute.with(defaults).model<MessagesOptionsInput>({
       id: modelID,
-      compatibility: { requireSignature: false, sanitizer: "moonshot" },
+      compatibility: { sanitizer: "moonshot" },
     })
   const responses = (modelID: string | ModelID) =>
     responsesRoute

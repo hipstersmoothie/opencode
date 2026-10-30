@@ -31,6 +31,7 @@ import { classifyProviderFailure } from "../provider-error.js"
 import { effortUpdate, resolveEffortUpdates } from "../effort-updates.js"
 import * as Cache from "./utils/cache.js"
 import { claudeVersion, supportsThinkingBlockBinding, THINKING_BINDING_BETA } from "./utils/claude-model.js"
+import { requireThinkingSignature } from "./utils/thinking-signature.js"
 import { Lifecycle } from "./utils/lifecycle.js"
 import { ToolStream } from "./utils/tool-stream.js"
 
@@ -827,25 +828,6 @@ const lowerToolResultContent = Effect.fnUntraced(function* (part: ToolResultPart
   return yield* Effect.forEach(content, (item) => lowerToolResultContentItem(item, request))
 })
 
-const requireThinkingSignature = (request: LLMRequest) => {
-  if (request.model.compatibility?.requireSignature !== undefined) return request.model.compatibility.requireSignature
-  const provider = request.model.provider.toLowerCase()
-  const model = request.model.id.toLowerCase()
-  const baseURL = (request.model.route.endpoint.baseURL ?? "").toLowerCase()
-  if (
-    provider === "kimi-for-coding" ||
-    provider === "moonshotai" ||
-    provider === "moonshotai-cn" ||
-    model.startsWith("kimi-") ||
-    baseURL.includes("api.kimi.com/coding") ||
-    baseURL.includes("api.moonshot.ai/anthropic") ||
-    baseURL.includes("api.moonshot.cn/anthropic")
-  )
-    return false
-  if (provider.includes("xiaomi") || model.includes("mimo") || baseURL.includes("xiaomimimo.com")) return false
-  return true
-}
-
 // Opus 4.8 and every Claude 5 model accept mid-conversation system messages; later versions inherit support.
 const supportsNativeSystemUpdates = (request: LLMRequest) => {
   const version = claudeVersion(request.model.id)
@@ -972,18 +954,9 @@ const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest, breakpoi
           }
           if (!signature || signature.trim().length === 0) {
             if (part.text.trim().length === 0) continue
-            if (!requireThinkingSignature(request)) {
+            if (!requireThinkingSignature(request.model)) {
               content.push({ type: "thinking", thinking: part.text, signature: "" })
-              continue
             }
-            // Without a signature this cannot be a valid thinking block per
-            // the SDK ThinkingBlockParam:3217 — demote to text so the
-            // conversation remains sendable.
-            content.push({
-              type: "text",
-              text: part.text,
-              cache_control: cacheControl(breakpoints, part.cache),
-            })
             continue
           }
           content.push({ type: "thinking", thinking: part.text, signature })

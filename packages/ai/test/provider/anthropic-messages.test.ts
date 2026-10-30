@@ -1035,61 +1035,77 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
-  it.effect("demotes unsigned reasoning when signatures are required", () =>
+  it.effect("drops unsigned reasoning when signatures are required", () =>
     Effect.gen(function* () {
-      const prepared = yield* compileUnsignedReasoning(model)
-
-      expect(prepared.body.messages).toEqual([
-        { role: "assistant", content: [{ type: "text", text: "unsigned reasoning" }] },
-      ])
+      for (const signed of [
+        model,
+        AnthropicMessages.route
+          .with({ endpoint: { baseURL: "https://compatible.test/v1/" }, auth: Auth.bearer("test") })
+          .model({ id: "openai/gpt-6.1-sol" }),
+        AnthropicMessages.route
+          .with({ endpoint: { baseURL: "https://compatible.test/v1/" }, auth: Auth.bearer("test") })
+          .model({ id: "google/gemini-3.8-flash" }),
+        AnthropicMessages.route
+          .with({ endpoint: { baseURL: "https://compatible.test/v1/" }, auth: Auth.bearer("test") })
+          .model({ id: "meta/muse-spark-1.3" }),
+        AnthropicMessages.route
+          .with({ endpoint: { baseURL: "https://compatible.test/v1/" }, auth: Auth.bearer("test") })
+          .model({ id: "xai/grok-4.7" }),
+      ]) {
+        const prepared = yield* compileUnsignedReasoning(signed)
+        expect(prepared.body.messages).toEqual([])
+      }
     }),
   )
 
-  it.effect("infers empty-signature compatibility across Kimi providers", () =>
+  it.effect("replays unsigned reasoning across open-weight Messages models", () =>
     Effect.gen(function* () {
-      const coding = AnthropicMessages.route.with({
-        provider: "kimi-for-coding",
+      const compatible = AnthropicMessages.route.with({
+        provider: "anthropic-compatible",
         endpoint: { baseURL: "https://compatible.test/v1/" },
         auth: Auth.header("x-api-key", "test"),
       })
-      const moonshot = AnthropicMessages.route
-        .with({
-          provider: "moonshotai",
-          endpoint: { baseURL: "https://api.moonshot.ai/anthropic" },
-          auth: Auth.bearer("test"),
-        })
-        .model({ id: "kimi-k2.6" })
-      const codingPrepared = yield* compileUnsignedReasoning(coding.model({ id: "k3" }))
-      const moonshotPrepared = yield* compileUnsignedReasoning(moonshot)
-
-      expect(codingPrepared.body.messages).toEqual([
-        {
-          role: "assistant",
-          content: [{ type: "thinking", thinking: "unsigned reasoning", signature: "" }],
-        },
-      ])
-      expect(moonshotPrepared.body.messages).toEqual([
-        {
-          role: "assistant",
-          content: [{ type: "thinking", thinking: "unsigned reasoning", signature: "" }],
-        },
-      ])
+      for (const id of [
+        "k3",
+        "kimi-k2.6",
+        "deepseek-v4-pro",
+        "MiniMax-M3",
+        "qwen3.8-flash",
+        "mimo-v2.6-pro",
+        "zai-org/GLM-5.3",
+        "openai/gpt-oss-120b",
+      ]) {
+        const prepared = yield* compileUnsignedReasoning(compatible.model({ id }))
+        expect(prepared.body.messages).toEqual([
+          {
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "unsigned reasoning", signature: "" }],
+          },
+        ])
+      }
     }),
   )
 
-  it.effect("lets an explicit signature requirement override inference", () =>
+  it.effect("lets an explicit signature requirement override inference in both directions", () =>
     Effect.gen(function* () {
-      const compatible = AnthropicMessages.route
-        .with({
-          provider: "kimi-for-coding",
-          endpoint: { baseURL: "https://api.kimi.com/coding/v1/" },
-          auth: Auth.header("x-api-key", "test"),
-        })
-        .model({ id: "k3", compatibility: { requireSignature: true } })
-      const prepared = yield* compileUnsignedReasoning(compatible)
+      const compatible = AnthropicMessages.route.with({
+        provider: "kimi-for-coding",
+        endpoint: { baseURL: "https://api.kimi.com/coding/v1/" },
+        auth: Auth.header("x-api-key", "test"),
+      })
+      const dropped = yield* compileUnsignedReasoning(
+        compatible.model({ id: "k3", compatibility: { requireSignature: true } }),
+      )
+      const allowed = yield* compileUnsignedReasoning(
+        compatible.model({ id: "claude-opus-5-5", compatibility: { requireSignature: false } }),
+      )
 
-      expect(prepared.body.messages).toEqual([
-        { role: "assistant", content: [{ type: "text", text: "unsigned reasoning" }] },
+      expect(dropped.body.messages).toEqual([])
+      expect(allowed.body.messages).toEqual([
+        {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "unsigned reasoning", signature: "" }],
+        },
       ])
     }),
   )

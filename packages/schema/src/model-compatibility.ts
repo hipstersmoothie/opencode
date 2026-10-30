@@ -34,6 +34,8 @@ export const Compatibility = Schema.Struct({
   requireFinishReason: Schema.Boolean.pipe(optional),
   /** OpenAI Chat: insert an assistant message between a tool result and the next user message. */
   requireAssistantAfterTool: Schema.Boolean.pipe(optional),
+  /** Anthropic Messages and Bedrock Converse: drop reasoning blocks without a cryptographic signature instead of sending unsigned thinking. Unset detects signed model families. */
+  requireSignature: Schema.Boolean.pipe(optional),
   /** OpenAI Chat, OpenAI Responses and Mistral: whether the endpoint accepts `prompt_cache_key`. */
   supportsPromptCacheKey: Schema.Boolean.pipe(optional),
   /** OpenAI Chat: request usage in the stream with `stream_options.include_usage`. Defaults to true. */

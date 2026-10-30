@@ -19499,6 +19499,9 @@
           "requireAssistantAfterTool": {
             "type": "boolean"
           },
+          "requireSignature": {
+            "type": "boolean"
+          },
           "supportsPromptCacheKey": {
             "type": "boolean"
           },
@@ -20769,6 +20772,9 @@
             "type": "boolean"
           },
           "requireAssistantAfterTool": {
+            "type": "boolean"
+          },
+          "requireSignature": {
             "type": "boolean"
           },
           "supportsPromptCacheKey": {

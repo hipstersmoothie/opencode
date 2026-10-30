@@ -110,7 +110,7 @@ export const configure = (input: Config) => {
         ...opts,
         endpoint: { baseURL: baseURL ?? `https://${host}/apps/anthropic/v1` },
       })
-      .model<MessagesOptionsInput>({ id, compatibility: { requireSignature: false } })
+      .model<MessagesOptionsInput>({ id })
   const responses = (id: string | ModelID) => responsesRoute.with(common).model<ResponsesOptionsInput>({ id })
   const media = MediaRoute.deployment({ ...input, baseURL: baseURL ?? `https://${host}/api/v1` }, opts.auth)
   const image = (id: string | ModelID, providerOptions?: ProviderOptions) =>

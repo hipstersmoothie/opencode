@@ -1197,7 +1197,7 @@ describe("Bedrock Converse route", () => {
 
   for (const signature of [undefined, "", "   "]) {
     for (const cache of ["none", "auto"] as const) {
-      it.effect(`demotes unsigned reasoning to text (${JSON.stringify(signature)}, cache: ${cache})`, () =>
+      it.effect(`drops unsigned reasoning on signed Bedrock models (${JSON.stringify(signature)}, cache: ${cache})`, () =>
         Effect.gen(function* () {
           const prepared = yield* compileRequest(
             LLM.request({
@@ -1217,14 +1217,54 @@ describe("Bedrock Converse route", () => {
               cache,
             }),
           )
-          expect(prepared.body.messages[1]).toEqual({
-            role: "assistant",
-            content: [{ text: "Partial thought" }, { cachePoint: { type: "default" } }],
-          })
+          expect(prepared.body.messages).toEqual([
+            {
+              role: "user",
+              content:
+                cache === "auto"
+                  ? [{ text: "Think" }, { text: "Continue" }, { cachePoint: { type: "default" } }]
+                  : [{ text: "Think" }, { text: "Continue" }],
+            },
+          ])
         }),
       )
     }
   }
+
+  it.effect("replays unsigned reasoningText on non-signed Bedrock models and drops on Grok/GPT", () =>
+    Effect.gen(function* () {
+      const bedrock = AmazonBedrock.configure({ baseURL: "https://bedrock-runtime.test", apiKey: "test-bearer" })
+      for (const id of [
+        "us.amazon.nova-2-lite-v1:0",
+        "global.moonshotai.kimi-k3",
+        "minimax.minimax-m2.1",
+        "deepseek.v3.2",
+        "openai.gpt-oss-120b-1:0",
+      ]) {
+        const prepared = yield* compileRequest(
+          LLM.request({
+            model: bedrock.model(id),
+            messages: [Message.user("Think"), Message.assistant([{ type: "reasoning", text: "Unsigned thought" }])],
+            cache: "none",
+          }),
+        )
+        expect(prepared.body.messages).toEqual([
+          { role: "user", content: [{ text: "Think" }] },
+          { role: "assistant", content: [{ reasoningContent: { reasoningText: { text: "Unsigned thought" } } }] },
+        ])
+      }
+      for (const id of ["us.xai.grok-4.6", "us.openai.gpt-5.6-sol"]) {
+        const prepared = yield* compileRequest(
+          LLM.request({
+            model: bedrock.model(id),
+            messages: [Message.user("Think"), Message.assistant([{ type: "reasoning", text: "Unsigned thought" }])],
+            cache: "none",
+          }),
+        )
+        expect(prepared.body.messages).toEqual([{ role: "user", content: [{ text: "Think" }] }])
+      }
+    }),
+  )
 
   it.effect("omits empty unsigned reasoning without leaving an empty or cache-only assistant", () =>
     Effect.gen(function* () {
@@ -1252,7 +1292,7 @@ describe("Bedrock Converse route", () => {
     }),
   )
 
-  it.effect("demotes foreign reasoning while preserving signed, redacted, text, and tool blocks", () =>
+  it.effect("drops foreign reasoning while preserving signed, redacted, text, and tool blocks", () =>
     Effect.gen(function* () {
       const cache = new CacheHint({ type: "ephemeral" })
       const prepared = yield* compileRequest(
@@ -1281,7 +1321,6 @@ describe("Bedrock Converse route", () => {
         {
           role: "assistant",
           content: [
-            { text: "Foreign thought" },
             { reasoningContent: { reasoningText: { text: "Signed thought", signature: "sig_1" } } },
             { reasoningContent: { reasoningText: { text: "", signature: "sig_2" } } },
             { reasoningContent: { redactedContent: "cmVkYWN0ZWQ=" } },
