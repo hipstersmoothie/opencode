@@ -43,6 +43,7 @@ import { ACPDirectories } from "./directories"
 import { ACPError } from "./error"
 import { ACPReplay } from "./replay"
 import type { ACPSessions, Attached, SupportedMcpServer } from "./sessions"
+import { ACPSteering } from "./steering"
 import type { ACPTurn } from "./turn"
 
 const AuthMethodID = "opencode-login"
@@ -63,6 +64,7 @@ export interface Interface {
   readonly setSessionMode: (input: SetSessionModeRequest) => Effect.Effect<SetSessionModeResponse, ACPError.Failure>
   readonly prompt: (input: PromptRequest, signal: AbortSignal) => Effect.Effect<PromptResponse, ACPError.Failure>
   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
+  readonly steer: ACPTurn.Interface["steer"]
 }
 
 export function make(input: {
@@ -127,6 +129,7 @@ export function make(input: {
         },
         authMethods: [authMethod],
         agentInfo: { name: "OpenCode", version: OPENCODE_VERSION },
+        _meta: ACPSteering.Advertised,
       }
     }),
     authenticate: Effect.fnUntraced(function* (params) {
@@ -237,6 +240,7 @@ export function make(input: {
     }),
     prompt: input.turn.prompt,
     cancel: input.turn.cancel,
+    steer: input.turn.steer,
   }
 }
 

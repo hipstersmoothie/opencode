@@ -18,6 +18,7 @@ import { ACPConnection } from "./connection"
 import { ACPError } from "./error"
 import { ACPService } from "./service"
 import { ACPSessions } from "./sessions"
+import { ACPSteering } from "./steering"
 import { ACPTurn } from "./turn"
 
 type HandlerContext<Params> = AgentHandlerContext<Params> & { readonly requestId?: JsonRpcId }
@@ -116,6 +117,13 @@ export const connect = Effect.fnUntraced(function* (client: OpenCodeClient, stre
   notification(
     "session/cancel",
     handle((service, ctx) => service.cancel(ctx.params)),
+  )
+  app.onRequest(
+    ACPSteering.Method,
+    ACPSteering.parse,
+    handle<ACPSteering.Request, { readonly outcome: ACPSteering.Outcome }>((service, ctx) => service.steer(ctx.params))(
+      spanName(ACPSteering.Method),
+    ),
   )
   const acp = ACPConnection.make(app, stream)
   const connection = acp.connection

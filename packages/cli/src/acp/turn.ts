@@ -27,11 +27,15 @@ import { ACPError } from "./error"
 import { ACPPermission } from "./permission"
 import { ACPPrompt } from "./prompt"
 import type { ACPSessions, Attached } from "./sessions"
+import type { ACPSteering } from "./steering"
 import { ACPTranslate } from "./translate"
 
 export interface Interface {
   readonly prompt: (input: PromptRequest, signal: AbortSignal) => Effect.Effect<PromptResponse, ACPError.Failure>
   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
+  readonly steer: (
+    input: ACPSteering.Request,
+  ) => Effect.Effect<{ readonly outcome: ACPSteering.Outcome }, ACPError.Failure>
   /** Unlike `cancel`, interrupts an idle session too, since server work can outlive its turn. */
   readonly close: (sessionID: string) => Effect.Effect<void, ACPError.Error | RequestError>
 }
@@ -66,6 +70,7 @@ export const make = Effect.fnUntraced(function* (input: {
   const scope = yield* Effect.scope
   const drainTimeout = yield* CancelDrainTimeout
   const turns = yield* FiberMap.make<string, PromptResponse, ACPError.Failure>()
+  const states = new Map<string, Ref.Ref<ACPTranslate.TurnState>>()
 
   const open = Effect.fnUntraced(function* (ctx: ACPTranslate.TurnContext, state: Ref.Ref<ACPTranslate.TurnState>) {
     // Parented to the service scope; the session scope may already be closed.
@@ -349,11 +354,10 @@ export const make = Effect.fnUntraced(function* (input: {
   )
 
   // Forked uninterruptible: interruption lands only in `execute` and the last check in `settle`, so a response follows.
-  const run = Effect.fn("cli.acp.turn.run")(function* (params: PromptRequest) {
+  const run = Effect.fn("cli.acp.turn.run")(function* (params: PromptRequest, state: Ref.Ref<ACPTranslate.TurnState>) {
     const attached = yield* input.sessions.require(params.sessionId)
     const prompt = yield* ACPPrompt.prepare(yield* input.catalog.get(attached.cwd), params.prompt)
     const capabilities = yield* Ref.get(input.capabilities)
-    const state = yield* Ref.make(ACPTranslate.initial)
     const exit = yield* Effect.acquireUseRelease(
       open(
         {
@@ -371,28 +375,79 @@ export const make = Effect.fnUntraced(function* (input: {
     return yield* settle(attached, yield* Ref.get(state), exit)
   })
 
+  // Synchronous and before setup, so concurrent prompts cannot both register and an early cancel or steer still applies.
+  const begin = (params: PromptRequest) =>
+    Effect.withFiber((fiber) => {
+      if (FiberMap.hasUnsafe(turns, params.sessionId)) {
+        return Effect.fail(
+          new ACPError.ServiceFailureError({
+            safeMessage: `Session already has an active ACP prompt: ${params.sessionId}`,
+            service: "session",
+          }),
+        )
+      }
+      const state = Ref.makeUnsafe(ACPTranslate.initial)
+      states.set(params.sessionId, state)
+      const forked = Effect.runForkWith(fiber.context)(
+        run(params, state).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (states.get(params.sessionId) === state) states.delete(params.sessionId)
+            }),
+          ),
+        ),
+        { uninterruptible: true },
+      )
+      FiberMap.setUnsafe(turns, params.sessionId, forked)
+      return Effect.succeed(forked)
+    })
+
   return {
     prompt: Effect.fnUntraced(function* (params, signal) {
-      // Synchronous and before setup, so concurrent prompts cannot both register and an early cancel still applies.
-      const turn = yield* Effect.withFiber((fiber) => {
-        if (FiberMap.hasUnsafe(turns, params.sessionId)) {
-          return Effect.fail(
-            new ACPError.ServiceFailureError({
-              safeMessage: `Session already has an active ACP prompt: ${params.sessionId}`,
-              service: "session",
-            }),
-          )
-        }
-        const forked = Effect.runForkWith(fiber.context)(run(params), { uninterruptible: true })
-        FiberMap.setUnsafe(turns, params.sessionId, forked)
-        return Effect.succeed(forked)
-      })
+      const turn = yield* begin(params)
       // A `$/cancel_request` for this prompt cancels its turn like `session/cancel`, rather than failing the request.
       yield* aborted(signal).pipe(Effect.andThen(Fiber.interrupt(turn)), Effect.forkChild)
       return yield* Fiber.join(turn)
     }),
     cancel: Effect.fnUntraced(function* (params) {
       yield* FiberMap.remove(turns, params.sessionId)
+    }),
+    steer: Effect.fn("cli.acp.turn.steer")(function* (params) {
+      const attached = yield* input.sessions.require(params.sessionId)
+      const prompt = yield* ACPPrompt.prepare(yield* input.catalog.get(attached.cwd), params.prompt)
+      const id = prompt.start.id
+      const state = states.get(params.sessionId)
+      // Registered before submission, so the turn cannot end between this check and the steer's delivery.
+      const accepted =
+        state &&
+        (yield* Ref.modify(state, (current) =>
+          current.ended ? [false, current] : [true, { ...current, steers: new Set(current.steers).add(id) }],
+        ))
+      if (state && accepted) {
+        // Submitted as plain input, since only a prompt's delivery can be tracked by its inbox ID.
+        return yield* submit(attached, { ...prompt, start: { type: "input", id }, command: undefined }).pipe(
+          Effect.as({ outcome: "injected" as const }),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("ACP steer failed", cause).pipe(
+              Effect.andThen(Ref.update(state, (current) => ACPTranslate.withoutSteer(current, id))),
+              Effect.as({ outcome: "failed" as const }),
+            ),
+          ),
+        )
+      }
+      // An ended turn may still be settling; let it finish so the next prompt is accepted.
+      const settling = yield* FiberMap.get(turns, params.sessionId)
+      if (Option.isSome(settling)) yield* Fiber.await(settling.value)
+      if (params._meta?.steering?.idleBehavior === "promptRequired") return { outcome: "promptRequired" as const }
+      const started = yield* begin({ sessionId: params.sessionId, prompt: [...params.prompt] }).pipe(Effect.option)
+      if (Option.isNone(started)) return { outcome: "failed" as const }
+      yield* Fiber.join(started.value).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning("ACP steered turn failed", cause),
+        ),
+        Effect.forkIn(scope),
+      )
+      return { outcome: "startedNewTurn" as const }
     }),
     close: Effect.fn("cli.acp.turn.close")(function* (sessionID) {
       if (FiberMap.hasUnsafe(turns, sessionID)) return yield* FiberMap.remove(turns, sessionID)

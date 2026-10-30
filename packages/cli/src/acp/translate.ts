@@ -46,6 +46,10 @@ type RetryStatus = {
 
 export type TurnState = {
   readonly started: boolean
+  /** Set with the terminal event; a steer that arrives after it is not part of this turn. */
+  readonly ended: boolean
+  /** Steered inbox items not yet delivered. The turn runs until they are, even past an idle session. */
+  readonly steers: ReadonlySet<string>
   readonly tools: ReadonlyMap<string, Tool>
   readonly retries: ReadonlyMap<string, RetryStatus>
   readonly compactions: ACPCompaction.Tracked
@@ -82,6 +86,8 @@ export type Folded = {
 
 export const initial: TurnState = {
   started: false,
+  ended: false,
+  steers: new Set(),
   tools: new Map(),
   retries: new Map(),
   compactions: new Map(),
@@ -125,8 +131,14 @@ export function fold(state: TurnState, event: OpenCodeEvent, ctx: TurnContext): 
   if (!sessionID || (sessionID !== ctx.sessionID && !child)) return { state, outputs: [] }
   if (event.type === "session.inbox.delivered" && event.data.inboxID === ctx.start.id)
     return { state: { ...state, started: true }, outputs: [] }
+  if (event.type === "session.inbox.delivered" && state.steers.has(event.data.inboxID))
+    return { state: withoutSteer(state, event.data.inboxID), outputs: [] }
   if (!state.started) return { state, outputs: [] }
   return child ? childEvent(state, event, ctx, child) : rootEvent(state, event, ctx)
+}
+
+export function withoutSteer(state: TurnState, id: string): TurnState {
+  return { ...state, steers: new Set([...state.steers].filter((steer) => steer !== id)) }
 }
 
 export function fromTrackedChild(state: TurnState, event: OpenCodeEvent) {
@@ -224,11 +236,17 @@ function rootEvent(state: TurnState, event: OpenCodeEvent, ctx: TurnContext): Fo
       return { state: { ...recorded, stepError: event.data.error }, outputs: [] }
     }
     case "session.execution.succeeded":
-      return { state, outputs: [], terminal: "succeeded" }
+      // A steer that missed the idle check starts a successor execution; it still belongs to this turn.
+      if (state.steers.size > 0) return { state, outputs: [] }
+      return { state: { ...state, ended: true }, outputs: [], terminal: "succeeded" }
     case "session.execution.interrupted":
-      return { state, outputs: [], terminal: "interrupted" }
+      return { state: { ...state, ended: true }, outputs: [], terminal: "interrupted" }
     case "session.execution.failed":
-      return { state: { ...state, executionError: event.data.error }, outputs: [], terminal: "failed" }
+      return {
+        state: { ...state, ended: true, executionError: event.data.error },
+        outputs: [],
+        terminal: "failed",
+      }
     default:
       return sessionEvent(state, event, ctx, undefined)
   }

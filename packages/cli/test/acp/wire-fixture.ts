@@ -489,15 +489,19 @@ export async function startWire(options: WireOptions = {}) {
     })
   }
 
+  const handlersCaughtUp = () => {
+    const target = counts.sent
+    return until(() => counts.handled >= target, "client handlers for every agent message (is one missing?)")
+  }
+
   const request = <Method extends AgentRequestMethod>(
     method: Method,
     params: AgentRequestParamsByMethod[Method],
     signal?: AbortSignal,
   ): Promise<AgentRequestResponsesByMethod[Method]> =>
-    connection.agent.request(method, params, signal ? { cancellationSignal: signal } : undefined).finally(() => {
-      const target = counts.sent
-      return until(() => counts.handled >= target, "client handlers for every agent message (is one missing?)")
-    })
+    connection.agent
+      .request(method, params, signal ? { cancellationSignal: signal } : undefined)
+      .finally(handlersCaughtUp)
 
   const initialize = (capabilities: InitializeOptions = {}) =>
     request("initialize", {
@@ -533,6 +537,8 @@ export async function startWire(options: WireOptions = {}) {
         { sessionId, prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt },
         signal,
       ),
+    steer: (params: object) =>
+      connection.agent.request<{ outcome: string }>("_session/steering", params).finally(handlersCaughtUp),
     waitForUpdate: (predicate: (update: SessionNotification) => boolean, description = "session/update") =>
       until(() => updates.find(predicate), description),
     async [Symbol.asyncDispose]() {
